@@ -22,44 +22,127 @@ def home():
 def outbound():
     number = request.form["to_number"]
     try:
-        telnyx.Call.create(connection_id=os.getenv("TELNYX_CONNECTION_ID"), to=number, from_=os.getenv("TELNYX_NUMBER"))
+        telnyx.Call.create(
+            connection_id=os.getenv("TELNYX_CONNECTION_ID"), 
+            to=number, 
+            from_=os.getenv("TELNYX_NUMBER")
+        )
         return render_template("messagesuccess.html")
     except:
         print("An error occurred")
         return render_template("messagefailure.html")
 
-# Endpoint that can be posted to so users can send a call
+# Call Control endpoint
 @app.route("/call_control", methods=["POST"])
 def inbound():
     body = json.loads(request.data)
     event = body.get("data").get("event_type")
 
     try:
+        call_control_id = body.get("data").get("payload").get("call_control_id")
+        call = telnyx.Call(connection_id=os.getenv("TELNYX_CONNECTION_ID"))
+        call.call_control_id = call_control_id
+
+        # Evento cuando se inicia la llamada
         if event == "call.initiated":
-            call = telnyx.Call(connection_id=os.getenv("TELNYX_CONNECTION_ID"))
-            call.call_control_id = body.get("data").get("payload").get("call_control_id")
             call.answer()
 
+        # Evento cuando se contesta la llamada
         elif event == "call.answered":
-            call = telnyx.Call(connection_id=os.getenv("TELNYX_CONNECTION_ID"))
-            call.call_control_id = body.get("data").get("payload").get("call_control_id")
+            # Reproducir menú inicial
+            menu_text = "Hola, gracias por comunicarte con Baby Nova. Para redirigirte a un asesor presiona 1. Para terminar la llamada presiona 2. Para repetir este menú presiona 3."
             call.speak(
-                payload="Hola, gracias por comunicarte con Baby Nova. Este es un mensaje de prueba de voz automatizada.",
+                payload=menu_text,
                 language="es-ES",
                 voice="female"
             )
+            # Recolectar opción del usuario
+            call.gather(
+                input="dtmf",
+                max_digits=1,
+                timeout=10,  # 10 segundos para marcar
+                event_url=os.getenv("WEBHOOK_URL") + "/call_control_gather",
+                # enviamos repeat=0 para indicar que aún no se repitió
+                payload=json.dumps({"repeat": 0})
+            )
+
+        # Evento cuando termina de reproducir el mensaje
         elif event == "call.speak.ended":
-            call = telnyx.Call(connection_id=os.getenv("TELNYX_CONNECTION_ID"))
-            call.call_control_id = body.get("data").get("payload").get("call_control_id")
+            # No colgamos aún, esperamos la opción del usuario
+            pass
+
+    except Exception as e:
+        print("Error:", e)
+        return json.dumps({"success": False}), 500, {"ContentType": "application/json"}
+
+    return json.dumps({"success": True}), 200, {"ContentType": "application/json"}
+
+# Endpoint para manejar la opción marcada por el usuario
+@app.route("/call_control_gather", methods=["POST"])
+def gather():
+    body = json.loads(request.data)
+    payload = body.get("data").get("payload")
+    digits = payload.get("digits")
+    call_control_id = payload.get("call_control_id")
+    repeat_flag = payload.get("repeat", 0)  # 0 si no se ha repetido aún
+
+    call = telnyx.Call(connection_id=os.getenv("TELNYX_CONNECTION_ID"))
+    call.call_control_id = call_control_id
+
+    menu_text = "Para redirigirte a un asesor presiona 1. Para terminar la llamada presiona 2. Para repetir este menú presiona 3."
+
+    if digits == "1":
+        call.speak(
+            payload="Redirigiéndote a un asesor, por favor espera.",
+            language="es-ES",
+            voice="female"
+        )
+        # Por ahora colgamos después del mensaje
+        call.hangup()
+    elif digits == "2":
+        call.speak(
+            payload="Gracias por comunicarte. Hasta luego.",
+            language="es-ES",
+            voice="female"
+        )
+        call.hangup()
+    elif digits == "3":
+        # Repetir menú
+        call.speak(payload=menu_text, language="es-ES", voice="female")
+        call.gather(
+            input="dtmf",
+            max_digits=1,
+            timeout=10,
+            event_url=os.getenv("WEBHOOK_URL") + "/call_control_gather",
+            payload=json.dumps({"repeat": 1})  # ya se repitió
+        )
+    else:
+        # Si no marca nada
+        if repeat_flag == 0:
+            # Repetimos el menú una vez
+            call.speak(payload=menu_text, language="es-ES", voice="female")
+            call.gather(
+                input="dtmf",
+                max_digits=1,
+                timeout=10,
+                event_url=os.getenv("WEBHOOK_URL") + "/call_control_gather",
+                payload=json.dumps({"repeat": 1})
+            )
+        else:
+            # Segunda vez sin respuesta: colgar
+            call.speak(
+                payload="No se recibió ninguna opción. La llamada será finalizada. Hasta luego.",
+                language="es-ES",
+                voice="female"
+            )
             call.hangup()
-    except:
-        return json.dumps({"success":False}), 500, {"ContentType":"application/json"}
-    return json.dumps({"success":True}), 200, {"ContentType":"application/json"}
+
+    return json.dumps({"success": True}), 200, {"ContentType": "application/json"}
 
 
 # Main program execution
 def main():
-    port = int(os.getenv("PORT", 5000))  # Render asigna este puerto automáticamente
+    port = int(os.getenv("PORT", 5000))
     app.run(host="0.0.0.0", port=port, debug=True)
 
 
