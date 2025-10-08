@@ -31,18 +31,24 @@ def outbound():
         return render_template("messagefailure.html")
 
 @app.route("/call_control", methods=["POST"])
-def inbound():
+def call_control():
     body = json.loads(request.data)
     event = body.get("data", {}).get("event_type")
 
     try:
-        call_control_id = body.get("data", {}).get("payload", {}).get("call_control_id")
+        payload = body.get("data", {}).get("payload", {})
+        call_control_id = payload.get("call_control_id")
         call = telnyx.Call(connection_id=os.getenv("TELNYX_CONNECTION_ID"))
         call.call_control_id = call_control_id
 
-        # Quitar call.answer() en llamadas outbound
+        # Solo outbound, no se usa call.answer()
         if event == "call.answered":
-            menu_text = "Hola, gracias por comunicarte con Baby Nova. Para redirigirte a un asesor presiona 1. Para terminar la llamada presiona 2. Para repetir este menú presiona 3."
+            menu_text = (
+                "Hola, gracias por comunicarte con Baby Nova. "
+                "Para redirigirte a un asesor presiona 1. "
+                "Para terminar la llamada presiona 2. "
+                "Para repetir este menú presiona 3."
+            )
             call.speak(payload=menu_text, language="es-ES", voice="female")
             call.gather(
                 input="dtmf",
@@ -69,15 +75,29 @@ def gather():
     call = telnyx.Call(connection_id=os.getenv("TELNYX_CONNECTION_ID"))
     call.call_control_id = call_control_id
 
-    menu_text = "Para redirigirte a un asesor presiona 1. Para terminar la llamada presiona 2. Para repetir este menú presiona 3."
+    menu_text = (
+        "Para redirigirte a un asesor presiona 1. "
+        "Para terminar la llamada presiona 2. "
+        "Para repetir este menú presiona 3."
+    )
 
+    # Validar opción
     if digits == "1":
-        call.speak(payload="Redirigiéndote a un asesor, por favor espera.", language="es-ES", voice="female")
-        call.hangup()  # por ahora colgamos
+        call.speak(
+            payload="Redirigiéndote a un asesor, por favor espera.",
+            language="es-ES",
+            voice="female"
+        )
+        call.hangup()  # Por ahora colgamos
     elif digits == "2":
-        call.speak(payload="Gracias por comunicarte. Hasta luego.", language="es-ES", voice="female")
+        call.speak(
+            payload="Gracias por comunicarte. Hasta luego.",
+            language="es-ES",
+            voice="female"
+        )
         call.hangup()
     elif digits == "3" and repeat_flag == 0:
+        # Repetir menú una sola vez
         call.speak(payload=menu_text, language="es-ES", voice="female")
         call.gather(
             input="dtmf",
@@ -89,6 +109,7 @@ def gather():
     else:
         # Si no marca nada o opción inválida
         if repeat_flag == 0:
+            # Repetir menú una vez si timeout o opción inválida
             call.speak(payload=menu_text, language="es-ES", voice="female")
             call.gather(
                 input="dtmf",
@@ -98,7 +119,12 @@ def gather():
                 payload=json.dumps({"repeat": 1})
             )
         else:
-            call.speak(payload="No se recibió ninguna opción. La llamada será finalizada. Hasta luego.", language="es-ES", voice="female")
+            # Segunda vez sin respuesta: colgar
+            call.speak(
+                payload="No se recibió ninguna opción. La llamada será finalizada. Hasta luego.",
+                language="es-ES",
+                voice="female"
+            )
             call.hangup()
 
     return json.dumps({"success": True}), 200, {"ContentType": "application/json"}
