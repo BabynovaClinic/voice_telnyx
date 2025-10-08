@@ -44,8 +44,8 @@ def inbound():
             call = telnyx.Call(connection_id=os.getenv("TELNYX_CONNECTION_ID"))
             call.call_control_id = body.get("data").get("payload").get("call_control_id")
             call.speak(
-                payload="Hello, Telnyx user! Welcome to this call control demonstration",
-                language="en-US",
+                payload="Hola, gracias por comunicarte con Baby Nova. Este es un mensaje de prueba de voz automatizada.",
+                language="es-ES",
                 voice="female"
             )
         elif event == "call.speak.ended":
